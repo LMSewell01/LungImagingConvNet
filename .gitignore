@@ -1,0 +1,4 @@
+*.tmp
+/data
+*.code-workspace
+
