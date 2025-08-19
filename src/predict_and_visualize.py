@@ -1,123 +1,94 @@
-import os
 import tensorflow as tf
-import matplotlib.pyplot as plt
+from tensorflow.keras.models import load_model
+import os
 import numpy as np
-from data_loader import get_dataset, IMG_HEIGHT, IMG_WIDTH, NUM_CHANNELS, NUM_CLASSES
-from model import build_unet_resnet50 # Not strictly used for building, but good for context if needed
+import matplotlib.pyplot as plt
+import random
 
+# Import functions and constants from data_loader.py
+from data_loader import get_covid_qu_ex_paths, load_image, IMG_HEIGHT, IMG_WIDTH, NUM_CHANNELS, NUM_CLASSES
+# Import the U-Net model from model.py
+from model import build_unet_resnet50 # Changed from unet_model to build_unet_resnet50
 
-# --- Configuration Parameters ---
-DATA_DIR = 'data/raw'
-IMAGE_DIR = os.path.join(DATA_DIR, 'images')
-MASK_DIR = os.path.join(DATA_DIR, 'masks')
+# Import custom metrics and loss functions from train.py (now at top-level)
+from train import dice_coeff, dice_loss, combined_loss
 
-MODEL_SAVE_DIR = 'saved_models'
-CHECKPOINT_FILENAME = 'best_unet_resnet50.h5'
-CHECKPOINT_FILEPATH = os.path.join(MODEL_SAVE_DIR, CHECKPOINT_FILENAME)
+# --- Configuration Parameters for Prediction and Visualization ---
+DATA_DIR = 'data/raw/COVID-QU-Ex_Dataset' # MAKE SURE THIS PATH IS CORRECT
+MODEL_SAVE_DIR = 'saved_models' # Must match the directory in train.py
+MODEL_PATH = os.path.join(MODEL_SAVE_DIR, 'best_unet_resnet50.h5') # Path to the saved best model
+NUM_PREDICT_SAMPLES = 5 # Number of random samples to predict and visualize
 
-# Custom Dice Loss function (needed when loading model if it was used as a metric or loss)
-def dice_coef(y_true, y_pred, smooth=1e-7):
-    """
-    Dice coefficient for segmentation.
-    Args:
-        y_true: Ground truth masks.
-        y_pred: Predicted masks.
-        smooth: Smoothing factor to prevent division by zero.
-    Returns:
-        float: Dice coefficient.
-    """
-    y_true_f = tf.cast(tf.reshape(y_true, [-1]), tf.float32)
-    y_pred_f = tf.cast(tf.reshape(y_pred, [-1]), tf.float32)
-    intersection = tf.reduce_sum(y_true_f * y_pred_f)
-    union = tf.reduce_sum(y_true_f) + tf.reduce_sum(y_pred_f)
-    return (2. * intersection + smooth) / (union + smooth)
+# --- Main Prediction and Visualization Function ---
+def main():
+    print("Starting prediction and visualization script...")
 
-def display_images(display_list):
-    """
-    Helper function to display a list of images side-by-side.
-    Used for showing original image, true mask, and predicted mask.
-    """
-    plt.figure(figsize=(15, 15))
+    # Load test dataset paths
+    (_, _, _, _,
+     test_image_paths, test_mask_paths) = get_covid_qu_ex_paths(DATA_DIR)
 
-    title = ['Input Image', 'True Mask', 'Predicted Mask']
+    # Load the trained model
+    if not os.path.exists(MODEL_PATH):
+        print(f"Error: Model not found at {MODEL_PATH}. Please train the model first.")
+        return
 
-    for i in range(len(display_list)):
-        plt.subplot(1, len(display_list), i+1)
-        plt.title(title[i])
-        # For masks, use 'gray' colormap to make 0/1 visually clear
-        plt.imshow(tf.keras.utils.array_to_img(display_list[i]), cmap='gray' if i > 0 else None)
+    print(f"Loading model from {MODEL_PATH}...")
+    model = load_model(
+        MODEL_PATH,
+        custom_objects={
+            'dice_coeff': dice_coeff, # Now correctly importing dice_coeff
+            'dice_loss': dice_loss,
+            'combined_loss': combined_loss,
+            'build_unet_resnet50': build_unet_resnet50 # Include the model building function for robustness
+        }
+    )
+    print("Model loaded successfully.")
+
+    print(f"\nPredicting and visualizing {NUM_PREDICT_SAMPLES} random samples from the test set...")
+
+    # Select random samples for prediction
+    selected_indices = random.sample(range(len(test_image_paths)), min(NUM_PREDICT_SAMPLES, len(test_image_paths)))
+
+    plt.figure(figsize=(15, NUM_PREDICT_SAMPLES * 3)) # Adjust figure size dynamically
+
+    for i, idx in enumerate(selected_indices):
+        img_path = test_image_paths[idx]
+        mask_path = test_mask_paths[idx]
+
+        # Load and preprocess a single image and mask
+        image, true_mask = load_image(img_path, mask_path)
+        
+        # Add batch dimension for prediction
+        input_image = tf.expand_dims(image, 0) 
+
+        # Make prediction
+        predicted_mask = model.predict(input_image)[0] # Remove batch dimension
+        
+        # Threshold the predicted mask to get binary segmentation (0 or 1)
+        predicted_mask_binary = (predicted_mask > 0.5).astype(np.float32)
+
+        # Plot original image
+        plt.subplot(NUM_PREDICT_SAMPLES, 3, i * 3 + 1)
+        plt.imshow(image.numpy())
+        plt.title(f"Original Image ({os.path.basename(img_path)})")
         plt.axis('off')
+
+        # Plot true mask
+        plt.subplot(NUM_PREDICT_SAMPLES, 3, i * 3 + 2)
+        plt.imshow(true_mask.numpy().squeeze(), cmap='gray') # squeeze for 2D mask
+        plt.title("True Mask")
+        plt.axis('off')
+
+        # Plot predicted mask
+        plt.subplot(NUM_PREDICT_SAMPLES, 3, i * 3 + 3)
+        plt.imshow(predicted_mask_binary.squeeze(), cmap='gray') # squeeze for 2D mask
+        plt.title("Predicted Mask (Binary)")
+        plt.axis('off')
+
+    plt.tight_layout()
     plt.show()
 
-def main():
-    # --- 1. Prepare Data Paths (using dummy data for initial setup) ---
-    # We'll re-use dummy data creation logic for consistency.
-    num_dummy_samples = 100
-    os.makedirs(IMAGE_DIR, exist_ok=True)
-    os.makedirs(MASK_DIR, exist_ok=True)
+    print("\nVisualization complete.")
 
-    dummy_image_paths = []
-    dummy_mask_paths = []
-
-    if not os.path.exists(os.path.join(IMAGE_DIR, f"image_0.jpg")):
-        print(f"Creating {num_dummy_samples} dummy image and mask files for demonstration...")
-        for i in range(num_dummy_samples):
-            img_path = os.path.join(IMAGE_DIR, f"image_{i}.jpg")
-            mask_path = os.path.join(MASK_DIR, f"mask_{i}.jpg")
-            dummy_image_paths.append(img_path)
-            dummy_mask_paths.append(mask_path)
-
-            dummy_img = np.ones((IMG_HEIGHT, IMG_WIDTH, NUM_CHANNELS), dtype=np.uint8) * 255
-            tf.io.write_file(img_path, tf.image.encode_jpeg(dummy_img, quality=100))
-            
-            dummy_mask = np.zeros((IMG_HEIGHT, IMG_WIDTH, 1), dtype=np.uint8)
-            dummy_mask[IMG_HEIGHT//4:3*IMG_HEIGHT//4, IMG_WIDTH//4:3*IMG_HEIGHT//4] = 255
-            tf.io.write_file(mask_path, tf.image.encode_jpeg(dummy_mask, quality=100))
-        print("Dummy data creation complete.")
-    else:
-        for i in range(num_dummy_samples):
-            dummy_image_paths.append(os.path.join(IMAGE_DIR, f"image_{i}.jpg"))
-            dummy_mask_paths.append(os.path.join(MASK_DIR, f"mask_{i}.jpg"))
-
-    # --- 2. Create Test Dataset ---
-    # Use a small subset of the dummy data to visualize
-    num_test = 5 # Number of samples to predict and visualize
-    test_image_paths = dummy_image_paths[-num_test:]
-    test_mask_paths = dummy_mask_paths[-num_test:]
-
-    print(f"\nPreparing {num_test} test samples for prediction and visualization.")
-
-    # Get the test dataset (no augmentation, no shuffling)
-    # Use a batch size of 1 for easier individual sample processing in loop
-    test_dataset = get_dataset(test_image_paths, test_mask_paths, 1, augment=False, shuffle=False)
-    
-    # --- 3. Load the Best Trained Model ---
-    if not os.path.exists(CHECKPOINT_FILEPATH):
-        print(f"Error: Model checkpoint not found at {CHECKPOINT_FILEPATH}")
-        print("Please ensure you have run 'python src/train.py' first to train and save the model.")
-        return
-
-    try:
-        model = tf.keras.models.load_model(CHECKPOINT_FILEPATH, custom_objects={'dice_coef': dice_coef})
-        print(f"\nSuccessfully loaded best model from {CHECKPOINT_FILEPATH}")
-    except Exception as e:
-        print(f"Error loading model: {e}")
-        print("Ensure the custom_objects dictionary correctly maps custom function names.")
-        return
-
-    # --- 4. Make Predictions and Visualize ---
-    print("\nMaking predictions and visualizing results...")
-    for i, (image, mask) in enumerate(test_dataset.take(num_test)):
-        prediction_mask = model.predict(image)[0] # Get prediction for the first (and only) image in batch
-
-        # Threshold the probability mask to get a binary mask (0 or 1)
-        # We can use 0.5 as a simple threshold for sigmoid output
-        predicted_binary_mask = (prediction_mask > 0.5).astype(np.float32)
-
-        print(f"Visualizing sample {i+1}/{num_test}...")
-        display_images([image[0], mask[0], predicted_binary_mask])
-
-    print("\nPrediction and visualization complete.")
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
