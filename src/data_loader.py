@@ -9,37 +9,80 @@ import glob
 IMG_HEIGHT = 256
 IMG_WIDTH = 256
 NUM_CHANNELS = 3 # RGB for X-rays (even if grayscale, often loaded as 3 channels for backbone compatibility)
-NUM_CLASSES = 1 # Binary segmentation: abnormality vs. background
+NUM_CLASSES = 4 # NEW: 4 classes (0:Background, 1:Healthy Lung, 2:COVID Infection, 3:Non-COVID Infection)
 
 # --- Data Loading and Preprocessing Functions ---
 
-def load_image(image_path, mask_path):
+def load_image_and_multi_class_mask(image_path, covid_infection_mask_path, lung_mask_path, image_type):
     """
-    Loads and preprocesses a single image and its corresponding mask.
-    Handles both actual mask files and the 'PLACEHOLDER_HEALTHY_MASK' for normal images.
+    Loads and preprocesses a single image and creates its multi-class mask.
+    Handles different image types (Normal, COVID, Non-COVID) to create appropriate masks.
     """
     # Load image
     image = tf.io.read_file(image_path)
-    # Decode as PNG since your directory structure shows .png files
     image = tf.image.decode_png(image, channels=NUM_CHANNELS)
     image = tf.image.convert_image_dtype(image, tf.float32) # Normalize to [0, 1]
     image = tf.image.resize(image, [IMG_HEIGHT, IMG_WIDTH])
 
-    # Load or create mask
-    if mask_path == 'PLACEHOLDER_HEALTHY_MASK':
-        # Create an all-black mask (0s) for healthy images.
-        mask = tf.zeros((IMG_HEIGHT, IMG_WIDTH, NUM_CLASSES), dtype=tf.float32)
-    else:
-        mask = tf.io.read_file(mask_path)
-        # Masks are typically grayscale (single channel), and your structure shows .png
-        mask = tf.image.decode_png(mask, channels=1)
-        mask = tf.image.convert_image_dtype(mask, tf.float32)
-        # Resize masks using NEAREST_NEIGHBOR to preserve crisp boundaries
-        mask = tf.image.resize(mask, [IMG_HEIGHT, IMG_WIDTH], method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-        # Binarize the mask: anything > 0.5 (or any non-zero value in original mask) becomes 1.0, else 0.0
-        mask = tf.where(mask > 0.5, 1.0, 0.0)
+    # Initialize an empty mask with NUM_CLASSES channels (one-hot encoding)
+    # The last dimension for one-hot encoded masks should be NUM_CLASSES
+    multi_class_mask = tf.zeros((IMG_HEIGHT, IMG_WIDTH, NUM_CLASSES), dtype=tf.float32)
 
-    return image, mask
+    # Load general lung mask for all cases
+    lung_mask = tf.io.read_file(lung_mask_path)
+    lung_mask = tf.image.decode_png(lung_mask, channels=1)
+    lung_mask = tf.image.convert_image_dtype(lung_mask, tf.float32)
+    lung_mask = tf.image.resize(lung_mask, [IMG_HEIGHT, IMG_WIDTH], method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+    lung_mask = tf.where(lung_mask > 0.5, 1.0, 0.0) # Binarize
+
+    # Create the multi-class mask based on image_type
+    if image_type == 'Normal':
+        # Class 1: Healthy Lung (where lung_mask is 1)
+        # Class 0: Background (where lung_mask is 0)
+        healthy_lung_pixels = tf.cast(lung_mask, tf.int32) # Pixels in lung get class 1
+        multi_class_mask = tf.one_hot(tf.squeeze(healthy_lung_pixels, axis=-1), NUM_CLASSES) # Squeeze to remove channel dim before one_hot
+        # The background (0) is handled by tf.one_hot default (all zeros except class 0 if that's what you want, but here, it's implicit)
+
+    elif image_type == 'COVID':
+        # Load specific COVID-19 infection mask
+        covid_infection_mask = tf.io.read_file(covid_infection_mask_path)
+        covid_infection_mask = tf.image.decode_png(covid_infection_mask, channels=1)
+        covid_infection_mask = tf.image.convert_image_dtype(covid_infection_mask, tf.float32)
+        covid_infection_mask = tf.image.resize(covid_infection_mask, [IMG_HEIGHT, IMG_WIDTH], method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+        covid_infection_mask = tf.where(covid_infection_mask > 0.5, 1.0, 0.0) # Binarize
+
+        # Start with background (0)
+        # Then, fill with Healthy Lung (1) where lung is present and no infection
+        # Then, fill with COVID Infection (2) where infection is present
+        
+        # Create an integer mask first
+        int_mask = tf.zeros((IMG_HEIGHT, IMG_WIDTH), dtype=tf.int32)
+        
+        # Where lung_mask is 1 (inside lung), set to Class 1 (Healthy Lung)
+        int_mask = tf.where(lung_mask[:,:,0] == 1, 1, int_mask)
+        
+        # Where covid_infection_mask is 1, set to Class 2 (COVID Infection)
+        # This will overwrite Class 1 in the infected regions
+        int_mask = tf.where(covid_infection_mask[:,:,0] == 1, 2, int_mask)
+
+        multi_class_mask = tf.one_hot(int_mask, NUM_CLASSES)
+
+    elif image_type == 'Non-COVID':
+        # For Non-COVID, we define the *entire lung region* as Class 3 (Non-COVID Infection)
+        # since specific infection masks are not provided for non-COVID in this dataset.
+        # Start with background (0)
+        int_mask = tf.zeros((IMG_HEIGHT, IMG_WIDTH), dtype=tf.int32)
+        
+        # Where lung_mask is 1 (inside lung), set to Class 3 (Non-COVID Infection)
+        int_mask = tf.where(lung_mask[:,:,0] == 1, 3, int_mask)
+
+        multi_class_mask = tf.one_hot(int_mask, NUM_CLASSES)
+    
+    # Ensure the final mask has the correct shape [H, W, NUM_CLASSES]
+    multi_class_mask = tf.reshape(multi_class_mask, (IMG_HEIGHT, IMG_WIDTH, NUM_CLASSES))
+
+    return image, multi_class_mask
+
 
 def augment_data(image, mask):
     """
@@ -50,148 +93,180 @@ def augment_data(image, mask):
         image = tf.image.flip_left_right(image)
         mask = tf.image.flip_left_right(mask)
     
-    # You can add other augmentations like random rotations, brightness changes, etc.
-    # Ensure they are applied consistently to both image and mask where appropriate.
-
     return image, mask
 
-def get_dataset(image_paths, mask_paths, batch_size, augment=True, shuffle=True):
+def get_dataset(image_paths_list, mask_paths_list, image_types_list, batch_size, augment=True, shuffle=True):
     """
-    Creates a TensorFlow Dataset from image and mask paths.
+    Creates a TensorFlow Dataset from image, mask paths, and image types.
     """
-    dataset = tf.data.Dataset.from_tensor_slices((image_paths, mask_paths))
+    dataset = tf.data.Dataset.from_tensor_slices((image_paths_list, mask_paths_list[0], mask_paths_list[1], image_types_list))
     
     if shuffle:
-        # Shuffle a large buffer of data to ensure randomness
-        dataset = dataset.shuffle(buffer_size=len(image_paths))
+        dataset = dataset.shuffle(buffer_size=len(image_paths_list))
 
-    # Use map to apply load_image function
-    dataset = dataset.map(load_image, num_parallel_calls=tf.data.AUTOTUNE)
+    # Use map to apply load_image_and_multi_class_mask function
+    dataset = dataset.map(lambda img_p, covid_m_p, lung_m_p, img_t: load_image_and_multi_class_mask(img_p, covid_m_p, lung_m_p, img_t), num_parallel_calls=tf.data.AUTOTUNE)
 
     if augment:
-        # Apply augmentation if enabled
         dataset = dataset.map(augment_data, num_parallel_calls=tf.data.AUTOTUNE)
 
-    # Batch and prefetch for performance
     dataset = dataset.batch(batch_size)
     dataset = dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
 
     return dataset
 
+
 def get_covid_qu_ex_paths(base_data_dir):
     """
-    Gathers image and specific infection mask paths for the COVID-QU-Ex Dataset,
-    based on the provided directory structure.
-    Focuses on COVID-19 cases with specific masks and Normal cases from main splits.
+    Gathers image paths, specific infection mask paths, general lung mask paths, and image types
+    for the COVID-QU-Ex Dataset for multi-class segmentation.
     """
     print(f"Loading COVID-QU-Ex dataset paths from: {base_data_dir}")
 
     all_image_paths = []
-    all_mask_paths = []
+    all_covid_infection_mask_paths = [] # Specific infection masks for COVID cases
+    all_lung_mask_paths = []            # General lung masks for all cases
+    all_image_types = []                # To differentiate Normal, COVID, Non-COVID
 
     # --- Define base paths based on your provided directory structure ---
-    # Note: Using 'COVID-19' instead of 'COVID' for image folders as per your screenshot
-    # and 'COVID-QU-Ex_Dataset' with underscore.
+    def collect_paths_for_split(split_name):
+        _image_paths = []
+        _covid_infection_mask_paths = []
+        _lung_mask_paths = []
+        _image_types = []
 
-    # --- Train Split Paths ---
-    train_covid_images_dir = os.path.join(base_data_dir, 'Train', 'COVID-19', 'images')
-    train_normal_images_dir = os.path.join(base_data_dir, 'Train', 'Normal', 'images')
-    # Specific infection masks are in a separate top-level folder
-    train_infection_masks_dir = os.path.join(base_data_dir, 'Infection_Segmentation_Data', 'Train', 'COVID-19', 'infection masks')
+        # Paths for images
+        covid_images_dir = os.path.join(base_data_dir, split_name, 'COVID-19', 'images')
+        non_covid_images_dir = os.path.join(base_data_dir, split_name, 'Non-COVID', 'images')
+        normal_images_dir = os.path.join(base_data_dir, split_name, 'Normal', 'images') # Assuming normal also has an 'images' folder. Verify!
 
-    # --- Val Split Paths ---
-    val_covid_images_dir = os.path.join(base_data_dir, 'Val', 'COVID-19', 'images')
-    val_normal_images_dir = os.path.join(base_data_dir, 'Val', 'Normal', 'images')
-    val_infection_masks_dir = os.path.join(base_data_dir, 'Infection_Segmentation_Data', 'Val', 'COVID-19', 'infection masks')
+        # Paths for masks
+        covid_specific_infection_masks_dir = os.path.join(base_data_dir, 'Infection_Segmentation_Data', split_name, 'COVID-19', 'infection masks')
+        
+        # General lung masks for all types are in 'lung masks' folder
+        covid_lung_masks_dir = os.path.join(base_data_dir, split_name, 'COVID-19', 'lung masks')
+        non_covid_lung_masks_dir = os.path.join(base_data_dir, split_name, 'Non-COVID', 'lung masks')
+        normal_lung_masks_dir = os.path.join(base_data_dir, split_name, 'Normal', 'lung masks')
 
-    # --- Test Split Paths ---
-    test_covid_images_dir = os.path.join(base_data_dir, 'Test', 'COVID-19', 'images')
-    test_normal_images_dir = os.path.join(base_data_dir, 'Test', 'Normal', 'images')
-    test_infection_masks_dir = os.path.join(base_data_dir, 'Infection_Segmentation_Data', 'Test', 'COVID-19', 'infection masks')
 
-    # --- Helper to collect paths for a given split ---
-    def collect_paths_for_split(images_dir, masks_dir, normal_dir):
-        split_image_paths = []
-        split_mask_paths = []
-
-        # Collect COVID-19 images and their *specific infection masks*
-        covid_images = sorted(glob.glob(os.path.join(images_dir, '*.png')))
-        print(f"  Found {len(covid_images)} images in {images_dir}")
-
+        # --- Collect COVID-19 cases ---
+        covid_images = sorted(glob.glob(os.path.join(covid_images_dir, '*.png')))
+        print(f"  Found {len(covid_images)} images in {covid_images_dir}")
         for img_path in covid_images:
             base_filename = os.path.basename(img_path)
-            # Mask filename is assumed to be the same as image filename
-            mask_path = os.path.join(masks_dir, base_filename)
-            
-            if os.path.exists(mask_path):
-                split_image_paths.append(img_path)
-                split_mask_paths.append(mask_path)
-            else:
-                # This could happen if not all COVID-19 images have specific infection masks,
-                # or if the naming convention is slightly off for the infection masks.
-                # print(f"Warning: Infection mask not found for {img_path} at expected path: {mask_path}. Skipping.")
-                pass # We will only add images for which a specific infection mask exists.
+            infection_mask_path = os.path.join(covid_specific_infection_masks_dir, base_filename)
+            general_lung_mask_path = os.path.join(covid_lung_masks_dir, base_filename)
 
-        # Collect Normal images (masks will be all black / 'healthy' - synthetically made)
-        normal_images = sorted(glob.glob(os.path.join(normal_dir, '*.png')))
-        print(f"  Found {len(normal_images)} images in {normal_dir}")
+            # Only include COVID images that have both a specific infection mask and a general lung mask
+            if os.path.exists(infection_mask_path) and os.path.exists(general_lung_mask_path):
+                _image_paths.append(img_path)
+                _covid_infection_mask_paths.append(infection_mask_path)
+                _lung_mask_paths.append(general_lung_mask_path)
+                _image_types.append('COVID')
+            else:
+                # print(f"Warning: Missing infection or lung mask for COVID image: {img_path}")
+                pass # Skip if critical masks are missing
+
+        # --- Collect Non-COVID cases ---
+        non_covid_images = sorted(glob.glob(os.path.join(non_covid_images_dir, '*.png')))
+        print(f"  Found {len(non_covid_images)} images in {non_covid_images_dir}")
+        for img_path in non_covid_images:
+            base_filename = os.path.basename(img_path)
+            general_lung_mask_path = os.path.join(non_covid_lung_masks_dir, base_filename) # Only general lung mask expected
+
+            if os.path.exists(general_lung_mask_path):
+                _image_paths.append(img_path)
+                _covid_infection_mask_paths.append('NO_COVID_INFECTION_MASK') # Placeholder for COVID infection mask
+                _lung_mask_paths.append(general_lung_mask_path)
+                _image_types.append('Non-COVID')
+            else:
+                # print(f"Warning: Missing general lung mask for Non-COVID image: {img_path}")
+                pass # Skip if lung mask is missing
+
+        # --- Collect Normal cases ---
+        normal_images = sorted(glob.glob(os.path.join(normal_images_dir, '*.png')))
+        print(f"  Found {len(normal_images)} images in {normal_images_dir}")
         for img_path in normal_images:
-            split_image_paths.append(img_path)
-            split_mask_paths.append('PLACEHOLDER_HEALTHY_MASK')
+            base_filename = os.path.basename(img_path)
+            general_lung_mask_path = os.path.join(normal_lung_masks_dir, base_filename) # Only general lung mask expected
+
+            if os.path.exists(general_lung_mask_path):
+                _image_paths.append(img_path)
+                _covid_infection_mask_paths.append('NO_COVID_INFECTION_MASK') # Placeholder for COVID infection mask
+                _lung_mask_paths.append(general_lung_mask_path)
+                _image_types.append('Normal')
+            else:
+                # print(f"Warning: Missing general lung mask for Normal image: {img_path}")
+                pass # Skip if lung mask is missing
         
-        return split_image_paths, split_mask_paths
+        return _image_paths, _covid_infection_mask_paths, _lung_mask_paths, _image_types
 
     print("\nCollecting Train split paths:")
-    train_images, train_masks = collect_paths_for_split(
-        train_covid_images_dir, train_infection_masks_dir, train_normal_images_dir
-    )
-    all_image_paths.extend(train_images)
-    all_mask_paths.extend(train_masks)
+    train_paths = collect_paths_for_split('Train')
+    all_image_paths.extend(train_paths[0])
+    all_covid_infection_mask_paths.extend(train_paths[1])
+    all_lung_mask_paths.extend(train_paths[2])
+    all_image_types.extend(train_paths[3])
 
     print("\nCollecting Val split paths:")
-    val_images, val_masks = collect_paths_for_split(
-        val_covid_images_dir, val_infection_masks_dir, val_normal_images_dir
-    )
-    all_image_paths.extend(val_images)
-    all_mask_paths.extend(val_masks)
+    val_paths = collect_paths_for_split('Val')
+    all_image_paths.extend(val_paths[0])
+    all_covid_infection_mask_paths.extend(val_paths[1])
+    all_lung_mask_paths.extend(val_paths[2])
+    all_image_types.extend(val_paths[3])
 
     print("\nCollecting Test split paths:")
-    test_images, test_masks = collect_paths_for_split(
-        test_covid_images_dir, test_infection_masks_dir, test_normal_images_dir
-    )
-    all_image_paths.extend(test_images)
-    all_mask_paths.extend(test_masks)
-
+    test_paths = collect_paths_for_split('Test')
+    all_image_paths.extend(test_paths[0])
+    all_covid_infection_mask_paths.extend(test_paths[1])
+    all_lung_mask_paths.extend(test_paths[2])
+    all_image_types.extend(test_paths[3])
 
     if not all_image_paths:
-        raise ValueError("No paired image and mask files or normal images found. Check dataset paths and naming conventions as per your directory structure.")
+        raise ValueError("No images found. Check dataset paths and naming conventions as per your directory structure.")
 
-    # Combine all collected paths for splitting
-    combined_paths = list(zip(all_image_paths, all_mask_paths))
-    random.shuffle(combined_paths) # Shuffle before splitting to ensure good distribution
+    # Combine all collected paths for splitting - ensures all lists are shuffled together
+    combined_data = list(zip(all_image_paths, all_covid_infection_mask_paths, all_lung_mask_paths, all_image_types))
+    random.shuffle(combined_data)
 
-    images, masks = zip(*combined_paths)
+    images, covid_masks, lung_masks, types = zip(*combined_data)
     
-    # Perform standard 80/10/10 train/val/test split
-    # Stratify by mask type to ensure balanced distribution of pathological/normal cases
-    stratify_labels = ['pathology' if m != 'PLACEHOLDER_HEALTHY_MASK' else 'normal' for m in masks]
+    # Stratify by image type to ensure balanced distribution of Normal, COVID, Non-COVID in splits
+    stratify_labels = list(types) # Already strings like 'Normal', 'COVID', 'Non-COVID'
 
-    # Ensure consistent splitting behavior by always performing the full split here
-    train_val_images, test_images, train_val_masks, test_masks = train_test_split(
-        images, masks, test_size=0.1, random_state=42, stratify=stratify_labels
+    train_val_indices, test_indices = train_test_split(
+        range(len(images)), test_size=0.1, random_state=42, stratify=stratify_labels
     )
-    
-    train_images, val_images, train_masks, val_masks = train_test_split(
-        train_val_images, train_val_masks, test_size=(0.1 / 0.9), random_state=42, 
-        stratify=['pathology' if m != 'PLACEHOLDER_HEALTHY_MASK' else 'normal' for m in train_val_masks]
+    train_indices, val_indices = train_test_split(
+        train_val_indices, test_size=(0.1 / 0.9), random_state=42, stratify=[stratify_labels[i] for i in train_val_indices]
     )
+
+    # Helper to create lists from indices
+    def get_split_data(indices, data_list):
+        return [data_list[i] for i in indices]
+
+    train_image_paths = get_split_data(train_indices, images)
+    train_covid_mask_paths = get_split_data(train_indices, covid_masks)
+    train_lung_mask_paths = get_split_data(train_indices, lung_masks)
+    train_image_types = get_split_data(train_indices, types)
+
+    val_image_paths = get_split_data(val_indices, images)
+    val_covid_mask_paths = get_split_data(val_indices, covid_masks)
+    val_lung_mask_paths = get_split_data(val_indices, lung_masks)
+    val_image_types = get_split_data(val_indices, types)
+
+    test_image_paths = get_split_data(test_indices, images)
+    test_covid_mask_paths = get_split_data(test_indices, covid_masks)
+    test_lung_mask_paths = get_split_data(test_indices, lung_masks)
+    test_image_types = get_split_data(test_indices, types)
 
     print(f"\nTotal images found for processing: {len(images)}")
-    print(f"Training samples after custom split: {len(train_images)}")
-    print(f"Validation samples after custom split: {len(val_images)}")
-    print(f"Test samples after custom split: {len(test_images)}")
+    print(f"Training samples after custom split: {len(train_image_paths)}")
+    print(f"Validation samples after custom split: {len(val_image_paths)}")
+    print(f"Test samples after custom split: {len(test_image_paths)}")
 
-    return (list(train_images), list(train_masks),
-            list(val_images), list(val_masks),
-            list(test_images), list(test_masks))
+    # Return lists of lists for masks and types, as get_dataset now expects this
+    return (train_image_paths, [train_covid_mask_paths, train_lung_mask_paths], train_image_types,
+            val_image_paths, [val_covid_mask_paths, val_lung_mask_paths], val_image_types,
+            test_image_paths, [test_covid_mask_paths, test_lung_mask_paths], test_image_types)
 

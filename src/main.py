@@ -2,19 +2,19 @@ import argparse
 import os
 import sys
 
-# Add the src directory to the Python path to allow importing modules from it
-# This is crucial when running main.py from the project root.
-sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
+# No need to add 'src' to path if main.py is in src and importing other src modules directly
+# sys.path.append(os.path.join(os.path.dirname(__file__), 'src')) # Remove this line
 
-# Import the main functions from your scripts
-from src.train import main as train_main
-from src.evaluate import main as evaluate_main
-from src.predict_and_visualize import main as predict_visualize_main
+# Import the main functions from your scripts directly (assuming they are in the same 'src' directory)
+from train import main as train_main
+from evaluate import main as evaluate_main
+from predict_and_visualize import main as predict_visualize_main
 
 def main():
     """
     Main entry point for the COVID-19 X-ray Infection Segmentation project.
     Allows running different tasks (train, evaluate, predict) via command-line arguments.
+    This version assumes main.py is located within the 'src' directory.
     """
     parser = argparse.ArgumentParser(
         description="Run different tasks for the COVID-19 X-ray Infection Segmentation project."
