@@ -4,17 +4,17 @@ import numpy as np
 import datetime
 
 # Importing modules
-from data_loader import get_dataset, IMG_HEIGHT, IMG_WIDTH, NUM_CHANNELS, NUM_CLASSES, get_covid_qu_ex_paths
-from model import build_unet_resnet50
+from .data_loader import get_dataset, IMG_HEIGHT, IMG_WIDTH, NUM_CHANNELS, NUM_CLASSES, get_covid_qu_ex_paths
+from .model import build_unet_resnet50
 
 # ---- Config Params ----
-DATA_DIR = '../data/raw/COVID-QU-Ex_Dataset' # Path relative to src/
+DATA_DIR = 'data/raw/COVID-QU-Ex_Dataset' # Path relative to src/
 
 MODEL_SAVE_DIR = 'saved_models' # This path is relative to the current working directory (src/)
 os.makedirs(MODEL_SAVE_DIR, exist_ok=True)
 
 # Hyperparams
-BATCH_SIZE = 8
+BATCH_SIZE = 128
 EPOCHS = 20
 LEARNING_RATE = 1e-4
 
@@ -56,7 +56,9 @@ def combined_loss_multi_class(y_true, y_pred):
 # --- Main Training Function ---
 def main():
     print("Starting multi-class training script...")
-
+    policy = tf.keras.mixed_precision.Policy('mixed_float16')
+    tf.keras.mixed_precision.set_global_policy(policy)
+    print('Mixed precision enabled')
     # ---- 1. Prepare Data Paths ----
     # Updated get_covid_qu_ex_paths to return (image_paths, [covid_mask_paths, lung_mask_paths], image_types)
     train_image_paths, train_mask_paths_list, train_image_types, \
@@ -71,6 +73,8 @@ def main():
                               batch_size=BATCH_SIZE, augment=False, shuffle=False)
 
     # ---- 4. Build the Model ----
+    tf.config.optimizer.set_jit(True)
+    print('XLA JIT compiler enabled')
     model = build_unet_resnet50(input_shape=(IMG_HEIGHT, IMG_WIDTH, NUM_CHANNELS), num_classes=NUM_CLASSES)
     print("\nModel Built Successfully")
     model.summary()

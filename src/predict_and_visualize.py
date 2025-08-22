@@ -6,17 +6,20 @@ import matplotlib.pyplot as plt
 import random
 
 # Import functions and constants from data_loader.py
-from data_loader import get_covid_qu_ex_paths, load_image_and_multi_class_mask, IMG_HEIGHT, IMG_WIDTH, NUM_CHANNELS, NUM_CLASSES
+# IMPORTANT: These imports now correctly point to the multi-class setup
+from .data_loader import get_covid_qu_ex_paths, load_image_and_multi_class_mask, IMG_HEIGHT, IMG_WIDTH, NUM_CHANNELS, NUM_CLASSES
 # Import the U-Net model from model.py
-from model import build_unet_resnet50
+from .model import build_unet_resnet50
 
 # Import custom metrics and loss functions (now multi-class versions)
-from train import dice_coeff_multi_class, dice_loss_multi_class, combined_loss_multi_class
+# These are defined in train.py and needed for loading the model.
+from .train import dice_coeff_multi_class, dice_loss_multi_class, combined_loss_multi_class
 
 # --- Configuration Parameters for Prediction and Visualization ---
-DATA_DIR = '../data/raw/COVID-QU-Ex_Dataset'
+# IMPORTANT: DATA_DIR should be relative to the PROJECT ROOT
+DATA_DIR = 'data/raw/COVID-QU-Ex_Dataset'
 MODEL_SAVE_DIR = 'saved_models'
-MODEL_PATH = os.path.join(MODEL_SAVE_DIR, 'best_unet_resnet50_multi_class.h5') # New model name
+MODEL_PATH = os.path.join(MODEL_SAVE_DIR, 'best_unet_resnet50_multi_class.h5') # Matches the name in train.py
 NUM_PREDICT_SAMPLES = 5 # Number of random samples to predict and visualize
 
 # Define a colormap for multi-class visualization
@@ -46,31 +49,38 @@ def visualize_multi_class_mask(mask_one_hot):
 def main():
     print("Starting multi-class prediction and visualization script...")
 
-    # Load test dataset paths
-    _, _, _, _, \
+    # Load test dataset paths (get_covid_qu_ex_paths now returns 9 items for multi-class)
+    # We use underscores (_) for the train and validation paths as we only need the test paths here.
+    _, _, _, \
     _, _, _, \
     test_image_paths, test_mask_paths_list, test_image_types = get_covid_qu_ex_paths(DATA_DIR)
 
     # Load the trained model
     if not os.path.exists(MODEL_PATH):
-        print(f"Error: Model not found at {MODEL_PATH}. Please train the model first.")
+        print(f"Error: Model not found at {MODEL_PATH}")
+        print("Please ensure you have run 'python -m src.main --train' first to train and save the model.")
         return
 
     print(f"Loading model from {MODEL_PATH}...")
-    model = load_model(
-        MODEL_PATH,
-        custom_objects={
-            'dice_coeff_multi_class': dice_coeff_multi_class,
-            'dice_loss_multi_class': dice_loss_multi_class,
-            'combined_loss_multi_class': combined_loss_multi_class,
-            'build_unet_resnet50': build_unet_resnet50
-        }
-    )
-    print("Model loaded successfully.")
+    try:
+        model = tf.keras.models.load_model(
+            MODEL_PATH,
+            custom_objects={
+                'dice_coeff_multi_class': dice_coeff_multi_class,
+                'dice_loss_multi_class': dice_loss_multi_class,
+                'combined_loss_multi_class': combined_loss_multi_class,
+                'build_unet_resnet50': build_unet_resnet50 # Include model builder for robustness
+            }
+        )
+        print("Model loaded successfully.")
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        print("Ensure the custom_objects dictionary correctly maps custom function names and the model structure.")
+        return
 
     print(f"\nPredicting and visualizing {NUM_PREDICT_SAMPLES} random samples from the test set...")
 
-    # Select random samples for prediction
+    # Select random indices for prediction
     selected_indices = random.sample(range(len(test_image_paths)), min(NUM_PREDICT_SAMPLES, len(test_image_paths)))
 
     plt.figure(figsize=(18, NUM_PREDICT_SAMPLES * 4)) # Adjust figure size
@@ -127,7 +137,7 @@ def main():
     plt.tight_layout(rect=[0, 0.05, 1, 1])
     plt.show()
 
-    print("\nVisualization complete.")
+    print("\nPrediction and visualization complete.")
 
 if __name__ == '__main__':
     main()

@@ -12,9 +12,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__)))) # Add 
 
 # Import functions and constants from data_loader.py
 # Note: load_image is replaced by load_image_and_multi_class_mask
-from data_loader import get_covid_qu_ex_paths, load_image_and_multi_class_mask, IMG_HEIGHT, IMG_WIDTH, NUM_CHANNELS, NUM_CLASSES
+from .data_loader import get_covid_qu_ex_paths, load_image_and_multi_class_mask, IMG_HEIGHT, IMG_WIDTH, NUM_CHANNELS, NUM_CLASSES
 # Import the model building function from model.py
-from model import build_unet_resnet50
+from .model import build_unet_resnet50
 
 # --- Configuration for Testing ---
 # DATA_DIR should be relative to where your 'data' folder is located

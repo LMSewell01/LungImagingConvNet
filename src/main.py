@@ -6,9 +6,9 @@ import sys
 # sys.path.append(os.path.join(os.path.dirname(__file__), 'src')) # Remove this line
 
 # Import the main functions from your scripts directly (assuming they are in the same 'src' directory)
-from train import main as train_main
-from evaluate import main as evaluate_main
-from predict_and_visualize import main as predict_visualize_main
+from .train import main as train_main
+from .evaluate import main as evaluate_main
+from .predict_and_visualize import main as predict_visualize_main
 
 def main():
     """

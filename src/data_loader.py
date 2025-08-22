@@ -269,4 +269,3 @@ def get_covid_qu_ex_paths(base_data_dir):
     return (train_image_paths, [train_covid_mask_paths, train_lung_mask_paths], train_image_types,
             val_image_paths, [val_covid_mask_paths, val_lung_mask_paths], val_image_types,
             test_image_paths, [test_covid_mask_paths, test_lung_mask_paths], test_image_types)
-
