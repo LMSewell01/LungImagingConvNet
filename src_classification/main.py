@@ -5,16 +5,15 @@ import sys
 # Import the main functions from your scripts directly (assuming they are in the same 'src' directory)
 from .train import main as train_main
 from .evaluate import main as evaluate_main
-from .predict_and_visualize import main as predict_visualize_main
+from .predict import main as predict_main
 
 def main():
     """
-    Main entry point for the COVID-19 X-ray Infection Segmentation project.
+    Main entry point for the COVID-19 X-ray Classification project.
     Allows running different tasks (train, evaluate, predict) via command-line arguments.
-    This version assumes main.py is located within the 'src' directory.
     """
     parser = argparse.ArgumentParser(
-        description="Run different tasks for the COVID-19 X-ray Infection Segmentation project."
+        description="Run different tasks for the COVID-19 X-ray Classification project."
     )
     
     # Define command-line arguments for each task
@@ -33,7 +32,7 @@ def main():
         evaluate_main()
     elif args.predict:
         print("--- Running Prediction and Visualization Script ---")
-        predict_visualize_main()
+        predict_main()
     else:
         print("No task specified. Use --train, --evaluate, or --predict.")
         parser.print_help()

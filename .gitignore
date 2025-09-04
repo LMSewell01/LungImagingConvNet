@@ -2,4 +2,9 @@
 /data
 *.code-workspace
 /saved_models
+/models
 /venv
+/logs
+/images
+/src/iter1
+/src/iter2
