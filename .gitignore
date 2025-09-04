@@ -1,6 +1,7 @@
 *.tmp
 /data
 *.code-workspace
+*.h5
 /saved_models
 /models
 /venv
