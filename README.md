@@ -4,50 +4,10 @@ This repository contains code, notebooks, and resources for a deep learning proj
 
 ## Project Structure
 
-lung_abnormality_segmentation/
-├── config/                       # Configuration files (e.g., config.yaml)
-├── data/
-│   ├── processed/                # Preprocessed datasets
-│   └── raw/                      # Raw datasets (COVID-QU-Ex, ChestXray-Masks-and-Labels, etc.)
-├── images/
-│   ├── classification_model/     # Training/validation figures for classification
-│   └── segmentation_model/       # Training/validation figures for segmentation
-├── logs/
-│   ├── fit_classification/           # TensorBoard logs for classification runs
-│   ├── fit_multi_class_Iter_1/       # TensorBoard logs for segmentation (iteration 1)
-│   ├── fit_multi_class_Iter_2/       # TensorBoard logs for segmentation (iteration 2)
-│   └── fit_multiclass_segmentation/  # Additional segmentation logs
-├── notebooks/
-│   ├── 01_Introduction_&_Initial_Model_Details.ipynb
-│   ├── 02_Segmentation_Model_Analysis.ipynb
-│   ├── 03_Classification_Model_Analysis.ipynb
-│   └── .ipynb_checkpoints/
-├── saved_models/
-│   ├── saved_models_classification/        # Classification model checkpoints
-│   ├── saved_models_classification_iter2/  # Classification model (iteration 2)
-│   ├── saved_models_classification_iter3/  # Classification model (iteration 3)
-│   └── saved_models_segmentation/          # Segmentation model checkpoints
-├── src/
-│   ├── data_loader.py
-│   ├── evaluate.py
-│   ├── main.py
-│   ├── model.py
-│   ├── predict_and_visualize.py
-│   ├── train.py
-│   ├── iter1/                      # Segmentation experiment scripts
-│   └── iter2/
-├── src_classification/
-│   ├── data_loader.py
-│   ├── evaluate.py
-│   ├── main.py
-│   ├── model.py
-│   ├── predict.py
-│   └── train.py
-├── .gitignore
-├── lung_abnormality_segmentation.code-workspace
-└── README.md
-
-
+<details>
+<summary>Directory Tree</summary>
+lung_abnormality_segmentation/ ├── config/ # Configuration files (e.g., config.yaml) ├── data/ │ ├── processed/ # Preprocessed datasets │ └── raw/ # Raw datasets (COVID-QU-Ex, ChestXray-Masks-and-Labels, etc.) ├── images/ │ ├── classification_model/ # Training/validation figures for classification │ └── segmentation_model/ # Training/validation figures for segmentation ├── logs/ │ ├── fit_classification/ # TensorBoard logs for classification runs │ ├── fit_multi_class_Iter_1/ # TensorBoard logs for segmentation (iteration 1) │ ├── fit_multi_class_Iter_2/ # TensorBoard logs for segmentation (iteration 2) │ └── fit_multiclass_segmentation/ # Additional segmentation logs ├── notebooks/ │ ├── 01_Introduction_&_Initial_Model_Details.ipynb │ ├── 02_Segmentation_Model_Analysis.ipynb │ ├── 03_Classification_Model_Analysis.ipynb │ └── .ipynb_checkpoints/ ├── saved_models/ │ ├── saved_models_classification/ # Classification model checkpoints │ ├── saved_models_classification_iter2/ # Classification model (iteration 2) │ ├── saved_models_classification_iter3/ # Classification model (iteration 3) │ └── saved_models_segmentation/ # Segmentation model checkpoints ├── src/ │ ├── data_loader.py │ ├── evaluate.py │ ├── main.py │ ├── model.py │ ├── predict_and_visualize.py │ ├── train.py │ ├── iter1/ # Segmentation experiment scripts │ └── iter2/ ├── src_classification/ │ ├── data_loader.py │ ├── evaluate.py │ ├── main.py │ ├── model.py │ ├── predict.py │ └── train.py ├── .gitignore ├── lung_abnormality_segmentation.code-workspace └── README.md
+</details>
 
 ## Project Overview
 
@@ -83,12 +43,12 @@ lung_abnormality_segmentation/
    Place raw datasets in `data/raw/` as described above.
 
 3. **Train segmentation model:**  
-    python src.main.py --train
+    `python src.main.py --train`
 
 - Evaluate or predict with `--evaluate` or `--predict`.
 
 4. **Train classification model:**  
-    python src_classification.main.py --train
+    `python src_classification.main.py --train`
 - Evaluate or predict with `--evaluate` or `--predict`.
 
 5. **View results:**  
