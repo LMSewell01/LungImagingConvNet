@@ -1,11 +1,36 @@
-*.tmp
-/data
-*.code-workspace
+# Ignore Python cache and environment files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.env
+venv/
+ENV/
+env/
+.venv/
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore data and model files
+data/
+saved_models/
+models/
 *.h5
-/saved_models
-/models
-/venv
-/logs
-/images
-/src/iter1
-/src/iter2
+*.ckpt
+
+# Ignore logs and images
+logs/
+images/
+
+# Ignore workspace and temporary files
+*.tmp
+*.code-workspace
+
+# Ignore experiment folders
+src/iter1/
+src/iter2/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
